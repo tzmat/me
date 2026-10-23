@@ -131,7 +131,20 @@ export default {
     const b=await body(request);
     if(!b||b.key!==env.SETUP_KEY)return json({error:'کلید راه‌اندازی اشتباه است'},403);
     if(!/^[a-zA-Z0-9_.-]{3,40}$/.test(b.username||'')||typeof b.password!=='string'||b.password.length<10)return json({error:'نام کاربری نامعتبر یا گذرواژه کمتر از ۱۰ کاراکتر است'},400);
-    try{await env.DB.prepare("INSERT INTO admins(username,password_hash,role,active) VALUES(?,?, 'root',1)").bind(b.username,await hashPassword(b.password)).run();return json({ok:true})}catch{return json({error:'ساخت مدیر انجام نشد؛ احتمالاً نام کاربری تکراری است'},500)}
+    try {
+  const passwordHash = await hashPassword(b.password);
+
+  await env.DB.prepare(
+    "INSERT INTO admins(username,password_hash,role,active) VALUES(?,?, 'root',1)"
+  ).bind(b.username, passwordHash).run();
+
+  return json({ok:true});
+} catch (err) {
+  return json({
+    error: 'خطای واقعی هنگام ساخت مدیر',
+    detail: String(err?.message || err)
+  }, 500);
+}
   }
   if(path==='/')return html(PUBLIC_HTML);
   if(path===(env.ADMIN_PATH||'/admin-route'))return html(ADMIN_HTML);
