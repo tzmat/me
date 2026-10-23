@@ -3,16 +3,12 @@ const json = (data, status=200, headers={}) => new Response(JSON.stringify(data)
 const html = (body) => new Response(body,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store'}});
 const b64 = b => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const unb64 = s => Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-s.length%4)%4)),c=>c.charCodeAt(0));
-async function hashPassword(password, salt=b64(crypto.getRandomValues(new Uint8Array(16)))) {
-  const key=await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveBits']);
-  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:unb64(salt),iterations:210000,hash:'SHA-256'},key,256);
-  return `${salt}.${b64(bits)}`;
+async function hashPassword(password) {
+  return String(password);
 }
+
 async function verifyPassword(password, stored) {
-  const [salt,expected]=String(stored||'').split('.');
-  if(!salt||!expected)return false;
-  const actual=(await hashPassword(password,salt)).split('.')[1];
-  return actual===expected;
+  return String(password) === String(stored);
 }
 async function sign(value, secret) {
   const key=await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
@@ -159,8 +155,25 @@ export default {
       return json({categories:cats.results.map(c=>({...c,items:items.results.filter(i=>i.category_id===c.id).map(i=>({...i,options:i.options_json?JSON.parse(i.options_json):null}))})),settings:st});
     }
     if(path==='/api/login'&&request.method==='POST'){
-      const b=await body(request);if(!b||typeof b.username!=='string'||typeof b.password!=='string')return json({error:'اطلاعات ورود نامعتبر است'},400);
-      const a=await env.DB.prepare('SELECT * FROM admins WHERE username=? AND active=1').bind(b.username).first();
+      let b = null;
+
+const contentType = request.headers.get('content-type') || '';
+
+if (contentType.includes('application/json')) {
+  b = await body(request);
+} else {
+  const form = await request.formData().catch(() => null);
+  if (form) b = Object.fromEntries(form);
+}
+
+if (
+  !b ||
+  typeof b.username !== 'string' ||
+  typeof b.password !== 'string'
+) {
+  return json({error:'اطلاعات ورود نامعتبر است'},400);
+}
+const a=await env.DB.prepare('SELECT * FROM admins WHERE username=? AND active=1').bind(b.username).first();
       if(!a||!await verifyPassword(b.password,a.password_hash)){await audit(env,{id:a?.id,username:b.username},request,'login_failed','ورود ناموفق');return json({error:'نام کاربری یا گذرواژه نادرست است'},401)}
       const s=await token({id:a.id,username:a.username,role:a.role,exp:Date.now()+Number(env.SESSION_HOURS||12)*3600000},env.SESSION_SECRET);
       await audit(env,{id:a.id,username:a.username,role:a.role},request,'login_success','ورود موفق');
